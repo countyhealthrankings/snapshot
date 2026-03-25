@@ -1,10 +1,10 @@
-# app.R — 
+# app.R —
 # ----------------------------------------------------
 # - Load relational county-health data files from a GitHub repo (by year)
 # - Let user pick a Year and County
 # - Join category, factor, focus area, and measure tables
-# - Show a snapshot table 
-# - Provide users with the option to download the data as a csv 
+# - Show a snapshot table
+# - Provide users with the option to download the data as a csv
 # - Include a placeholder "Latest" option that currently points to the newest year in the repo
 
 suppressPackageStartupMessages({
@@ -17,7 +17,7 @@ suppressPackageStartupMessages({
   library(stringr)
   library(ggplot2)
   library(memoise)
-  library(gt) 
+  library(gt)
   library(bslib)
   library(digest)
   library(shiny.semantic)
@@ -25,23 +25,34 @@ suppressPackageStartupMessages({
 })
 
 # ---- Repo Config ----
-GITHUB_OWNER  <- Sys.getenv("CHD_GITHUB_OWNER",  unset = "County-Health-Rankings-and-Roadmaps")
-GITHUB_REPO   <- Sys.getenv("CHD_GITHUB_REPO",   unset = "relational_data")
+GITHUB_OWNER <- Sys.getenv(
+  "CHD_GITHUB_OWNER",
+  unset = "County-Health-Rankings-and-Roadmaps"
+)
+GITHUB_REPO <- Sys.getenv("CHD_GITHUB_REPO", unset = "relational_data")
 GITHUB_BRANCH <- Sys.getenv("CHD_GITHUB_BRANCH", unset = "main")
 #DATA_DIR      <- Sys.getenv("CHD_DATA_DIR",      unset = "relational_data")
-GITHUB_TOKEN  <- Sys.getenv("GITHUB_TOKEN", unset = NA)
+GITHUB_TOKEN <- Sys.getenv("GITHUB_TOKEN", unset = NA)
 
 # ---- Helpers: GitHub API and Raw URLs ----
 raw_url <- function(path) {
   paste0(
     "https://raw.githubusercontent.com/",
-    GITHUB_OWNER, "/", GITHUB_REPO, "/", GITHUB_BRANCH, "/", path
+    GITHUB_OWNER,
+    "/",
+    GITHUB_REPO,
+    "/",
+    GITHUB_BRANCH,
+    "/",
+    path
   )
 }
 
 api_headers <- function() {
-  h <- c(Accept = "application/vnd.github+json",
-         "User-Agent" = "county-health-dashboard-mvp")
+  h <- c(
+    Accept = "application/vnd.github+json",
+    "User-Agent" = "county-health-dashboard-mvp"
+  )
   if (!is.na(GITHUB_TOKEN) && nzchar(GITHUB_TOKEN)) {
     h <- c(Authorization = paste("Bearer", GITHUB_TOKEN), h)
   }
@@ -54,17 +65,16 @@ read_csv_github <- function(path) {
   readr::read_csv(url, show_col_types = FALSE, progress = FALSE)
 }
 
-# helper to download data for all counties 
+# helper to download data for all counties
 get_github_file_for_year <- function(pattern, year) {
-  
   api_url <- paste0(
     "https://api.github.com/repos/",
     "County-Health-Rankings-and-Roadmaps/",
     "relational_data/contents/downloadable"
   )
-  
+
   resp <- jsonlite::fromJSON(api_url)
-  
+
   resp %>%
     dplyr::filter(
       type == "file",
@@ -74,83 +84,86 @@ get_github_file_for_year <- function(pattern, year) {
 }
 
 
-
-# load the names datasets that are not year, county, or measure specific (ie these are always loaded) 
+# load the names datasets that are not year, county, or measure specific (ie these are always loaded)
 
 cat_names <- read_csv_github(file.path("t_category.csv"))
 fac_names <- read_csv_github(file.path("t_factor.csv"))
 foc_names <- read_csv_github(file.path("t_focus_area.csv"))
-mea_years <- read_csv_github(file.path("t_measure_years.csv")) %>% select(year, measure_id, years_used)
+mea_years <- read_csv_github(file.path("t_measure_years.csv")) %>%
+  select(year, measure_id, years_used)
 mea_compare <- read_csv_github(file.path("t_measure.csv"))
 # this has JRs comparable codes: compare_states and compare_years
-# where -1 = unknown, 0 = no, 1 = yes, and 2= with caution 
-
+# where -1 = unknown, 0 = no, 1 = yes, and 2= with caution
 
 mea_names = mea_years %>%
-  full_join(mea_compare, by = c("measure_id", "year")) 
+  full_join(mea_compare, by = c("measure_id", "year"))
 
 
-#define default years so something shows before api call 
+#define default years so something shows before api call
 available_years <- reactiveVal(c("2023", "2022"))
 
 list_year_dirs <- memoise(function() {
   # Build GitHub API URL for the repo directory
   url <- paste0(
-    "https://api.github.com/repos/", GITHUB_OWNER, "/", GITHUB_REPO,
+    "https://api.github.com/repos/",
+    GITHUB_OWNER,
+    "/",
+    GITHUB_REPO,
     "/contents/"
   )
-  
+
   # Fetch the contents
   resp <- httr::GET(url)
   if (httr::status_code(resp) >= 300) {
     warning("GitHub API call failed: ", httr::status_code(resp))
     return(character())
   }
-  
+
   # Parse JSON response
-  items <- jsonlite::fromJSON(httr::content(resp, as = "text", encoding = "UTF-8"))
-  
-  if (!length(items)) return(character())
-  
+  items <- jsonlite::fromJSON(httr::content(
+    resp,
+    as = "text",
+    encoding = "UTF-8"
+  ))
+
+  if (!length(items)) {
+    return(character())
+  }
+
   # Extract years from filenames
   years <- items %>%
     as_tibble() %>%
     filter(type == "file") %>%
     pull(name) %>%
-    str_extract("_([0-9]{4})\\.csv") %>%   # match "_20XX.csv"
-    str_remove_all("[^0-9]") %>%          # remove non-numeric chars
+    str_extract("_([0-9]{4})\\.csv") %>% # match "_20XX.csv"
+    str_remove_all("[^0-9]") %>% # remove non-numeric chars
     na.omit() %>%
     unique() %>%
     sort(decreasing = TRUE)
-  
+
   return(years)
 })
 
 
-
-
-
 #available_years <- shiny::reactiveVal(NULL)
-
-
 
 # ---- Load county list ----
 get_county_list <- function() {
   url <- "https://github.com/County-Health-Rankings-and-Roadmaps/chrr_measure_calcs/raw/main/inputs/county_fips.sas7bdat"
   temp <- tempfile(fileext = ".sas7bdat")
-  download.file(url, temp, mode = "wb")  # wb = write binary
+  download.file(url, temp, mode = "wb") # wb = write binary
   counties <- haven::read_sas(temp)
-  
+
   return(counties)
 }
 
-# add the full state name in 
+# add the full state name in
 state_lookup <- data.frame(
   state = state.abb,
   state_name = state.name,
   stringsAsFactors = FALSE
 )
-#need DC too 
+#need DC too
 state_lookup <- rbind(
   state_lookup,
   data.frame(
@@ -169,11 +182,10 @@ state_choices <- county_choices %>%
   dplyr::arrange(state_name)
 
 
-
 ##################################################################################
 # ---- UI ----
 ui <- semanticPage(
-  title = "County Snapshot",
+  title = "Health Snapshot",
   div(
     class = "ui warning message",
     div(
@@ -185,86 +197,91 @@ ui <- semanticPage(
           "<a href='https://www.countyhealthrankings.org/health-data' target='_blank'>",
           "County Health Rankings &amp; Roadmaps website</a>",
           " which will remain available through December 2026.<br><br>",
-          "We appreciate your help troubleshooting this tool. ", 
-          "If you encounter any bugs, please ", 
+          "We appreciate your help troubleshooting this tool. ",
+          "If you encounter any bugs, please ",
           "<a href='https://github.com/County-Health-Rankings-and-Roadmaps/snapshot/issues'target='blank'>",
           "open an issue on the app's GitHub repo</a>. You can also view planned changes and improvements there. Thank you!"
         )
       )
-    )),
-  
-  div(class = "ui container",
-      
-      
-      h2(class = "ui header", "County Snapshot"),
-      uiOutput("location_header_ui"),
-      helpText(
-        "Data loaded from:",
-        a(
-          sprintf("%s/%s@%s", GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH),
-          href = sprintf("https://github.com/%s/%s/tree/%s",
-                         GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH)
-          #, target = "_blank"
-        )
+    )
+  ),
+
+  div(
+    class = "ui container",
+
+    h2(class = "ui header", "Health Snapshot"),
+    uiOutput("location_header_ui"),
+    helpText(
+      "Data loaded from",
+      a("Zenodo", href = "https://zenodo.org/records/18332002"),
+      " using the ",
+      a(
+        "countyhealthR package",
+        href = "https://cran.r-project.org/web/packages/countyhealthR/refman/countyhealthR.html"
       ),
-      
-      div(class = "ui divider"),
-      
-      # Grid layout: left panel (filters) + right panel (main content)
-      div(class = "ui stackable grid",
-          
-          # --- Sidebar ---
-          div(class = "four wide column",
-              div(class = "ui raised segment",
-                  h4(class = "ui header", ""),
-                  
-                  selectInput(
-                    inputId = "state",
-                    label = "Select State:",
-                    choices = setNames(
-                      state_choices$state, #this is what input$state is defined as 
-                      state_choices$state_name), # this is waht the user selects  
-                    selected = state_choices$state[1]
-                  ),
-                  br(), 
-                  uiOutput("county_ui"),
-                  br(), 
-                  uiOutput("year_ui"),
-                  br(),
-                  br(),
-                  helpText(HTML("
+      "."
+    )
+  ),
+
+  div(class = "ui divider"),
+
+  # Grid layout: left panel (filters) + right panel (main content)
+  div(
+    class = "ui stackable grid",
+
+    # --- Sidebar ---
+    div(
+      class = "four wide column",
+      div(
+        class = "ui raised segment",
+        h4(class = "ui header", ""),
+
+        selectInput(
+          inputId = "state",
+          label = "Select State:",
+          choices = setNames(
+            state_choices$state, #this is what input$state is defined as
+            state_choices$state_name
+          ), # this is waht the user selects
+          selected = state_choices$state[1]
+        ),
+        br(),
+        uiOutput("county_ui"),
+        br(),
+        uiOutput("year_ui"),
+        br(),
+        br(),
+        helpText(HTML(
+          "
                     <b>Legend:</b> <br>
                     ✅ These data can be compared across states<br>
                     ❌ These data are incomparable across states<br>
-                    ⚠️ Use caution if comparing these data across states")),
-                  
-              )
-          ),
-          
-          # --- Main Panel ---
-          div(class = "twelve wide column",
-              
-              div(class = "ui segment",
-                  uiOutput("download_data_ui"),
-                  uiOutput("download_all_counties_ui"),
-                  br(),
-                  br(), 
-                  # no accordion, just separate gts for each cat  
-                  uiOutput("category_tables_ui")
-              )
+                    ⚠️ Use caution if comparing these data across states"
+        )),
       )
+    ),
+
+    # --- Main Panel ---
+    div(
+      class = "twelve wide column",
+
+      div(
+        class = "ui segment",
+        uiOutput("download_data_ui"),
+        uiOutput("download_all_counties_ui"),
+        br(),
+        br(),
+        # no accordion, just separate gts for each cat
+        uiOutput("category_tables_ui")
+      )
+    )
   )
 )
-)
-
-
-
 
 
 #############################################################################
 # ---- Server ----
 server <- function(input, output, session) {
-  
   # ---- Compute available years from mea_names ----
   #available_years <- reactive({
   #  req(mea_names)  # make sure the data is loaded
@@ -275,17 +292,17 @@ server <- function(input, output, session) {
   #})
   # provide default years immediately, update later with GitHub API
   available_years <- reactiveVal(c("2023", "2022"))
-  
-  
+
   # reactive to get full state name
   state_full <- reactive({
     req(input$state)
     full_name <- state_lookup[state_lookup$state == input$state, ]$state_name
-    if (length(full_name) == 0) full_name <- input$state
+    if (length(full_name) == 0) {
+      full_name <- input$state
+    }
     full_name
   })
-  
-  
+
   observe({
     yrs <- tryCatch(list_year_dirs(), error = function(e) character())
     if (length(yrs) == 0) {
@@ -293,13 +310,12 @@ server <- function(input, output, session) {
     }
     available_years(yrs)
   })
-  
-  
+
   output$year_ui <- renderUI({
     yrs <- available_years()
-    
+
     req(length(yrs) > 0)
-    
+
     # Make sure they're sorted numerically (descending, newest first)
     yrs_num <- sort(as.numeric(yrs), decreasing = TRUE)
     # Remove the maximum year (will be represented by "Latest")
@@ -311,34 +327,41 @@ server <- function(input, output, session) {
       selected = "Latest"
     )
   })
-  
+
   # Dynamically update county dropdown
   output$county_ui <- renderUI({
     req(input$state)
     counties_in_state <- county_choices %>%
       filter(state == input$state)
-    
+
     if (nrow(counties_in_state) == 0) {
-      return(selectInput("county", "Select County (optional: default is statewide):", choices = "Select a state first"))
+      return(selectInput(
+        "county",
+        "Select County (optional: default is statewide):",
+        choices = "Select a state first"
+      ))
     }
-    
-    selectInput("county", "Select County (optional; default is statewide):",
-                #choices = setNames(counties_in_state$fipscode, counties_in_state$county),
-                choices = c("Statewide", counties_in_state$county), 
-                #selected = counties_in_state$fipscode[1])
-                selected = "Statewide")
+
+    selectInput(
+      "county",
+      "Select County (optional; default is statewide):",
+      #choices = setNames(counties_in_state$fipscode, counties_in_state$county),
+      choices = c("Statewide", counties_in_state$county),
+      #selected = counties_in_state$fipscode[1])
+      selected = "Statewide"
+    )
   })
-  
-  
+
   resolved_year <- reactive({
     if (identical(input$year, "Latest")) {
-      yrs <- available_years(); req(yrs)
+      yrs <- available_years()
+      req(yrs)
       max(yrs)
     } else {
       input$year
     }
   })
-  
+
   output$download_data_ui <- renderUI({
     req(
       nzchar(input$state),
@@ -347,46 +370,41 @@ server <- function(input, output, session) {
     )
     # Use empty string if statewide
     county_label <- if (input$county == "Statewide") "" else input$county
-    
+
     label <- paste0(
       "Download data for ",
       county_label,
-      if (county_label != "") paste0(", ", input$state) else state_full(),   # add comma only if county is not empty
+      if (county_label != "") paste0(", ", input$state) else state_full(), # add comma only if county is not empty
       " (",
       resolved_year(),
       " )"
     )
-    
+
     downloadButton(
       outputId = "download_data",
       label = label
     )
   })
-  
+
   output$download_all_counties_ui <- renderUI({
     req(nzchar(input$year))
-    
-   
-      downloadButton(
-        "download_analytic_all_counties",
-        paste0("Download analytic data for all counties (", resolved_year(), ")")
-      
+
+    downloadButton(
+      "download_analytic_all_counties",
+      paste0("Download analytic data for all counties (", resolved_year(), ")")
     )
   })
-  
-  
-  
+
   output$download_data <- downloadHandler(
-    
     filename = function() {
       req(
         nzchar(input$state),
         nzchar(input$county),
         nzchar(input$year)
       )
-      
+
       county_label <- if (input$county == "Statewide") "" else input$county
-      
+
       paste0(
         input$state,
         if (county_label != "") paste0("_", county_label) else "",
@@ -404,24 +422,23 @@ server <- function(input, output, session) {
       write.csv(measure_values, file, row.names = FALSE)
     }
   )
-  
+
   output$download_analytic_all_counties <- downloadHandler(
-    
     filename = function() {
       req(nzchar(input$year))
       paste0("analytic_all_counties_", resolved_year(), ".csv")
     },
-    
+
     content = function(file) {
       req(nzchar(input$year))
-      
+
       year <- resolved_year()
-      
+
       f <- get_github_file_for_year(
         pattern = "analytic",
         year = year
       )
-      
+
       download.file(
         url = f$download_url,
         destfile = file,
@@ -430,180 +447,192 @@ server <- function(input, output, session) {
     }
   )
 
-  
   year_data <- reactive({
-    y <- resolved_year(); req(y)
-    
-    mea_df <- read_csv_github(file.path(paste0("t_measure_data_", y, ".csv"))) 
-    
-    
+    y <- resolved_year()
+    req(y)
+
+    mea_df <- read_csv_github(file.path(paste0("t_measure_data_", y, ".csv")))
+
     mea_df %>%
       select(
-        county_fips, state_fips, measure_id, 
-        raw_value, ci_low, ci_high
+        county_fips,
+        state_fips,
+        measure_id,
+        raw_value,
+        ci_low,
+        ci_high
       )
   })
-  
-  
+
   output$location_header_ui <- renderUI({
-    
     # Resolve year
     year_text <- if (identical(input$year, "Latest")) {
       resolved_year()
     } else {
       input$year
     }
-    
+
     # Safely handle county input
-    county_label <- if (
-      is.null(input$county) || input$county == "Statewide"
-    ) {
+    county_label <- if (is.null(input$county) || input$county == "Statewide") {
       ""
     } else {
       input$county
     }
-    
-    
+
     # Build location text
     location_text <- if (nzchar(county_label)) {
       paste0(county_label, " County, ", state_full())
     } else {
       state_full()
     }
-    
-    
+
     h3(
       class = "ui header",
       paste(location_text, " ", year_text)
     )
   })
-  
-  
-  
+
   county_df <- reactive({
     req(input$state, input$county)
-    
+
     # If statewide, don't create county_df
     if (input$county == "Statewide") {
       return(NULL)
     }
     # find the fips codes for the chosen state + county
     chosen <- county_choices %>%
-      filter(state == input$state & county == input$county) #note that the input county is the county name 
+      filter(state == input$state & county == input$county) #note that the input county is the county name
     #chosen = county_choices %>% filter(state == "MN" & county == "Olmsted County")
-    
+
     # Defensive check
     req(nrow(chosen) > 0)
-    
+
     state_fips <- chosen$statecode[1]
     county_fips <- chosen$countycode[1]
     req(state_fips, county_fips)
-    
+
     df <- year_data()
     req(df)
-    
-    
+
     # filter measure data by fips
     df %>%
       filter(state_fips == !!state_fips, county_fips == !!county_fips)
-    
-    # for quick n dirty testing 
+
+    # for quick n dirty testing
     #county_df = mea_df %>% filter(state_fips == !!state_fips, county_fips == !!county_fips)
   })
-  
+
   state_df <- reactive({
     req(input$state, input$year)
-    y <- resolved_year(); req(y) 
-    
+    y <- resolved_year()
+    req(y)
+
     # find the fips codes for the chosen state + county
     chosen <- county_choices %>%
       filter(state == input$state)
     # Defensive check
-    req(nrow(chosen) > 0)  # ensures chosen is not empty
-    
-    #for quick n dirty testing 
+    req(nrow(chosen) > 0) # ensures chosen is not empty
+
+    #for quick n dirty testing
     #chosen = county_choices %>% filter(state == "MN" & county == "Olmsted County")
 
-    
-    
     input_state_fips <- chosen$statecode[1]
     req(input_state_fips)
     county_fips <- "000"
-    
+
     # construct path to state data CSV for the chosen year
     # state_file = sprintf("https://github.com/County-Health-Rankings-and-Roadmaps/chrr_measure_calcs/raw/main/relational_data/%s/t_state_data_%s.csv", 2023, 2023)
-    
+
     state_file <- sprintf(
       "https://github.com/County-Health-Rankings-and-Roadmaps/relational_data/raw/main/t_state_data_%s.csv",
-      y)
-    
+      y
+    )
+
     df <- tryCatch(
       readr::read_csv(state_file, show_col_types = FALSE),
-      error = function(e) { 
+      error = function(e) {
         warning("Failed to load state data: ", e$message)
         return(NULL)
       }
     )
-    
+
     # filter for the chosen state
-    #state_df = 
+    #state_df =
     df %>%
       dplyr::filter(state_fips == !!input_state_fips) %>%
-      dplyr::select(measure_id, state_fips, raw_value, ci_low,ci_high) %>% 
-      rename(stateval = raw_value, 
-             state_ci_low = ci_low, 
-             state_ci_high = ci_high)
+      dplyr::select(measure_id, state_fips, raw_value, ci_low, ci_high) %>%
+      rename(
+        stateval = raw_value,
+        state_ci_low = ci_low,
+        state_ci_high = ci_high
+      )
   })
-  
+
   ntl_df <- reactive({
     req(input$year)
-    y <- resolved_year(); req(y) 
-    
+    y <- resolved_year()
+    req(y)
+
     # construct path to state data CSV for the chosen year
     # state_file = sprintf("https://github.com/County-Health-Rankings-and-Roadmaps/chrr_measure_calcs/raw/main/relational_data/%s/t_state_data_%s.csv", 2023, 2023)
-    
+
     state_file <- sprintf(
       "https://github.com/County-Health-Rankings-and-Roadmaps/relational_data/raw/main/t_state_data_%s.csv",
-      y)
-    
+      y
+    )
+
     df <- tryCatch(
       readr::read_csv(state_file, show_col_types = FALSE),
-      error = function(e) { 
+      error = function(e) {
         warning("Failed to load state data: ", e$message)
         return(NULL)
       }
     )
-    req(df)  # only if downstream code needs df
-    
-    # filter ntl vals only 
-    #ntl_df = 
-      df %>%
+    req(df) # only if downstream code needs df
+
+    # filter ntl vals only
+    #ntl_df =
+    df %>%
       dplyr::filter(state_fips == "00") %>%
-      dplyr::select(measure_id, state_fips, raw_value, ci_low,ci_high) %>% 
-      rename(ntlval = raw_value, 
-             ntl_ci_low = ci_low, 
-             ntl_ci_high = ci_high)
+      dplyr::select(measure_id, state_fips, raw_value, ci_low, ci_high) %>%
+      rename(ntlval = raw_value, ntl_ci_low = ci_low, ntl_ci_high = ci_high)
   })
-  
-  
-  
+
   measure_values_data <- reactive({
     req(input$year, input$state)
-    y <- resolved_year(); req(y) 
-    
+    y <- resolved_year()
+    req(y)
+
     # Build the measure mapping
     measure_map <- mea_names %>%
-      filter(year == y) %>% 
-      left_join(foc_names, by = c("measure_parent" = "focus_area_id", "year")) %>%
-      left_join(fac_names, by = c("focus_area_parent" = "factor_id", "year")) %>%
+      filter(year == y) %>%
+      left_join(
+        foc_names,
+        by = c("measure_parent" = "focus_area_id", "year")
+      ) %>%
+      left_join(
+        fac_names,
+        by = c("focus_area_parent" = "factor_id", "year")
+      ) %>%
       left_join(cat_names, by = c("factor_parent" = "category_id", "year")) %>%
-      select(measure_id, measure_name, years_used, factor_name, category_name, display_precision, format_type, compare_states, compare_years, description)
-    
+      select(
+        measure_id,
+        measure_name,
+        years_used,
+        factor_name,
+        category_name,
+        display_precision,
+        format_type,
+        compare_states,
+        compare_years,
+        description
+      )
+
     # Start with the correct base data
     if (input$county == "Statewide") {
       req(state_df(), ntl_df())
       measure_values <- state_df() %>%
-        left_join(ntl_df()%>% select(-state_fips), by = "measure_id") %>%
+        left_join(ntl_df() %>% select(-state_fips), by = "measure_id") %>%
         left_join(measure_map, by = "measure_id")
     } else {
       req(county_df(), state_df(), ntl_df())
@@ -612,7 +641,7 @@ server <- function(input, output, session) {
         left_join(ntl_df() %>% select(-state_fips), by = "measure_id") %>%
         left_join(measure_map, by = "measure_id")
     }
-    
+
     # Apply formatting
     measure_values <- measure_values %>%
       mutate(
@@ -621,217 +650,386 @@ server <- function(input, output, session) {
           case_when(
             is.na(ci_low) | is.na(ci_high) ~ as.character(
               case_when(
-                format_type == 0 ~ scales::number(raw_value, accuracy = 1 / (10^display_precision)),
-                format_type == 1 ~ scales::percent(raw_value, accuracy = 1 / (10^display_precision)),
-                format_type == 2 ~ scales::dollar(raw_value, accuracy = 1 / (10^display_precision)),
-                format_type == 3 ~ scales::number(raw_value, accuracy = 1 / (10^display_precision))
+                format_type == 0 ~ scales::number(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                ),
+                format_type == 1 ~ scales::percent(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                ),
+                format_type == 2 ~ scales::dollar(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                ),
+                format_type == 3 ~ scales::number(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                )
               )
             ),
             TRUE ~ case_when(
               format_type == 0 ~ paste0(
-                scales::number(raw_value, accuracy = 1 / (10^display_precision)), " (",
-                scales::number(ci_low, accuracy = 1 / (10^display_precision)), ", ",
-                scales::number(ci_high, accuracy = 1 / (10^display_precision)), ")"
+                scales::number(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                ),
+                "\n(",
+                scales::number(ci_low, accuracy = 1 / (10^display_precision)),
+                ", ",
+                scales::number(ci_high, accuracy = 1 / (10^display_precision)),
+                ")"
               ),
               format_type == 1 ~ paste0(
-                scales::percent(raw_value, accuracy = 1 / (10^display_precision)), " (",
-                scales::percent(ci_low, accuracy = 1 / (10^display_precision)), ", ",
-                scales::percent(ci_high, accuracy = 1 / (10^display_precision)), ")"
+                scales::percent(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                ),
+                "\n(",
+                scales::percent(ci_low, accuracy = 1 / (10^display_precision)),
+                ", ",
+                scales::percent(ci_high, accuracy = 1 / (10^display_precision)),
+                ")"
               ),
               format_type == 2 ~ paste0(
-                scales::dollar(raw_value, accuracy = 1 / (10^display_precision)), " (",
-                scales::dollar(ci_low, accuracy = 1 / (10^display_precision)), ", ",
-                scales::dollar(ci_high, accuracy = 1 / (10^display_precision)), ")"
+                scales::dollar(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                ),
+                "\n(",
+                scales::dollar(ci_low, accuracy = 1 / (10^display_precision)),
+                ", ",
+                scales::dollar(ci_high, accuracy = 1 / (10^display_precision)),
+                ")"
               ),
               format_type == 3 ~ paste0(
-                scales::number(raw_value, accuracy = 1 / (10^display_precision)), " (",
-                scales::number(ci_low, accuracy = 1 / (10^display_precision)), ", ",
-                scales::number(ci_high, accuracy = 1 / (10^display_precision)), ")"
+                scales::number(
+                  raw_value,
+                  accuracy = 1 / (10^display_precision)
+                ),
+                "\n(",
+                scales::number(ci_low, accuracy = 1 / (10^display_precision)),
+                ", ",
+                scales::number(ci_high, accuracy = 1 / (10^display_precision)),
+                ")"
               )
             )
           )
         } else {
-          NULL  # No county values if statewide
+          NULL # No county values if statewide
         },
-        
+
         # The rest of the formatting applies to all selections
         measure_display = paste0(measure_name, " (", years_used, ")"),
-        
+
         stateval_fmt = case_when(
           is.na(state_ci_low) | is.na(state_ci_high) ~ as.character(
             case_when(
-              format_type == 0 ~ scales::number(stateval, accuracy = 1 / (10^display_precision), big.mark = ","),
-              format_type == 1 ~ scales::percent(stateval, accuracy = 1 / (10^display_precision)),
-              format_type == 2 ~ scales::dollar(stateval, accuracy = 1 / (10^display_precision)),
-              format_type == 3 ~ scales::number(stateval, accuracy = 1 / (10^display_precision), big.mark = ",")
+              format_type == 0 ~ scales::number(
+                stateval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              ),
+              format_type == 1 ~ scales::percent(
+                stateval,
+                accuracy = 1 / (10^display_precision)
+              ),
+              format_type == 2 ~ scales::dollar(
+                stateval,
+                accuracy = 1 / (10^display_precision)
+              ),
+              format_type == 3 ~ scales::number(
+                stateval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              )
             )
           ),
           TRUE ~ case_when(
             format_type == 0 ~ paste0(
-              scales::number(stateval, accuracy = 1 / (10^display_precision), big.mark = ","), " (",
-              scales::number(state_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::number(state_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::number(
+                stateval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              ),
+              "\n(",
+              scales::number(
+                state_ci_low,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ", ",
+              scales::number(
+                state_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             ),
             format_type == 1 ~ paste0(
-              scales::percent(stateval, accuracy = 1 / (10^display_precision)), " (",
-              scales::percent(state_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::percent(state_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::percent(stateval, accuracy = 1 / (10^display_precision)),
+              "\n(",
+              scales::percent(
+                state_ci_low,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ", ",
+              scales::percent(
+                state_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             ),
             format_type == 2 ~ paste0(
-              scales::dollar(stateval, accuracy = 1 / (10^display_precision)), " (",
-              scales::dollar(state_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::dollar(state_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::dollar(stateval, accuracy = 1 / (10^display_precision)),
+              "\n(",
+              scales::dollar(
+                state_ci_low,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ", ",
+              scales::dollar(
+                state_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             ),
             format_type == 3 ~ paste0(
-              scales::number(stateval, accuracy = 1 / (10^display_precision), big.mark = ","), " (",
-              scales::number(state_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::number(state_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::number(
+                stateval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              ),
+              "\n(",
+              scales::number(
+                state_ci_low,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ", ",
+              scales::number(
+                state_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             )
           )
         ),
-        
+
         ntlval_fmt = case_when(
           is.na(ntl_ci_low) | is.na(ntl_ci_high) ~ as.character(
             case_when(
-              format_type == 0 ~ scales::number(ntlval, accuracy = 1 / (10^display_precision), big.mark = ","),
-              format_type == 1 ~ scales::percent(ntlval, accuracy = 1 / (10^display_precision)),
-              format_type == 2 ~ scales::dollar(ntlval, accuracy = 1 / (10^display_precision)),
-              format_type == 3 ~ scales::number(ntlval, accuracy = 1 / (10^display_precision), big.mark = ",")
+              format_type == 0 ~ scales::number(
+                ntlval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              ),
+              format_type == 1 ~ scales::percent(
+                ntlval,
+                accuracy = 1 / (10^display_precision)
+              ),
+              format_type == 2 ~ scales::dollar(
+                ntlval,
+                accuracy = 1 / (10^display_precision)
+              ),
+              format_type == 3 ~ scales::number(
+                ntlval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              )
             )
           ),
           TRUE ~ case_when(
             format_type == 0 ~ paste0(
-              scales::number(ntlval, accuracy = 1 / (10^display_precision), big.mark = ","), " (",
-              scales::number(ntl_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::number(ntl_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::number(
+                ntlval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              ),
+              "\n(",
+              scales::number(ntl_ci_low, accuracy = 1 / (10^display_precision)),
+              ", ",
+              scales::number(
+                ntl_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             ),
             format_type == 1 ~ paste0(
-              scales::percent(ntlval, accuracy = 1 / (10^display_precision)), " (",
-              scales::percent(ntl_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::percent(ntl_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::percent(ntlval, accuracy = 1 / (10^display_precision)),
+              "\n(",
+              scales::percent(
+                ntl_ci_low,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ", ",
+              scales::percent(
+                ntl_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             ),
             format_type == 2 ~ paste0(
-              scales::dollar(ntlval, accuracy = 1 / (10^display_precision)), " (",
-              scales::dollar(ntl_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::dollar(ntl_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::dollar(ntlval, accuracy = 1 / (10^display_precision)),
+              "\n(",
+              scales::dollar(ntl_ci_low, accuracy = 1 / (10^display_precision)),
+              ", ",
+              scales::dollar(
+                ntl_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             ),
             format_type == 3 ~ paste0(
-              scales::number(ntlval, accuracy = 1 / (10^display_precision), big.mark = ","), " (",
-              scales::number(ntl_ci_low, accuracy = 1 / (10^display_precision)), ", ",
-              scales::number(ntl_ci_high, accuracy = 1 / (10^display_precision)), ")"
+              scales::number(
+                ntlval,
+                accuracy = 1 / (10^display_precision),
+                big.mark = ","
+              ),
+              "\n(",
+              scales::number(ntl_ci_low, accuracy = 1 / (10^display_precision)),
+              ", ",
+              scales::number(
+                ntl_ci_high,
+                accuracy = 1 / (10^display_precision)
+              ),
+              ")"
             )
           )
         ),
-        
+
         compare_years_text = case_when(
           compare_years == -1 ~ "Comparability across years is unknown",
-          compare_years ==  0 ~ "Not comparable across years",
-          compare_years ==  1 ~ "Comparable across years",
-          compare_years == 2 ~ "Use caution when comparing across years", 
+          compare_years == 0 ~ "Not comparable across years",
+          compare_years == 1 ~ "Comparable across years",
+          compare_years == 2 ~ "Use caution when comparing across years",
           TRUE ~ ""
         ),
-        
+
         years_used_display = paste0(years_used, ": ", compare_years_text),
-        
+
         compare_states_sym = case_when(
           compare_states == -1 ~ "❓",
-          compare_states ==  0 ~ "❌",
-          compare_states ==  1 ~ "✅",
+          compare_states == 0 ~ "❌",
+          compare_states == 1 ~ "✅",
           compare_states == 2 ~ "⚠️",
           TRUE ~ ""
         ),
-        
-        measure_label = paste0("**", measure_name, "**: ", description, "<br>", compare_states_sym)
+
+        measure_label = paste0(
+          "**",
+          measure_name,
+          "**: ",
+          description,
+          "<br>",
+          compare_states_sym
+        )
       )
-    
+
     measure_values
   })
-  
-download_data = reactive({
-    
-  measure_values_data() %>%  
-      select(state_fips, any_of("county_fips"), 
-        measure_id, measure_name, description,
-        factor_name,	category_name,
-        years_used, compare_years_text,
-        any_of("raw_value"), any_of("ci_low"), any_of("ci_high"), 
-        state_fips,	stateval,	state_ci_low,	state_ci_high,
-        ntlval,	ntl_ci_low,	ntl_ci_high,
-        
+
+  download_data = reactive({
+    measure_values_data() %>%
+      select(
+        state_fips,
+        any_of("county_fips"),
+        measure_id,
+        measure_name,
+        description,
+        factor_name,
+        category_name,
+        years_used,
+        compare_years_text,
+        any_of("raw_value"),
+        any_of("ci_low"),
+        any_of("ci_high"),
+        state_fips,
+        stateval,
+        state_ci_low,
+        state_ci_high,
+        ntlval,
+        ntl_ci_low,
+        ntl_ci_high,
       )
   })
-  
+
   snapshot_table <- reactive({
     req(measure_values_data())
-    
+
     final_table <- measure_values_data() %>%
-      #final_table = measure_values %>% 
-        select(measure_label, years_used_display, 
-               any_of("value_ci"), 
-               stateval_fmt, ntlval_fmt, factor_name, category_name)
-    
-     
+      #final_table = measure_values %>%
+      select(
+        measure_label,
+        years_used_display,
+        any_of("value_ci"),
+        stateval_fmt,
+        ntlval_fmt,
+        factor_name,
+        category_name
+      )
+
     # Force the display order based on year
     if (resolved_year() < 2025) {
       level_order <- c("Demographics", "Health Outcomes", "Health Factors")
     } else {
-      level_order <- c("Demographics", "Population Health and Well-being", "Community Conditions")
+      level_order <- c(
+        "Demographics",
+        "Population Health and Well-being",
+        "Community Conditions"
+      )
     }
-    
-    final_table %>% 
-      mutate(category_name_mod = factor(
-        ifelse(factor_name == "Demographics", "Demographics", category_name),
-        levels = level_order
-      )) %>%
-      filter(!is.na(category_name_mod))
-    
-  })
-  
 
-     
-    
+    final_table %>%
+      mutate(
+        category_name_mod = factor(
+          ifelse(factor_name == "Demographics", "Demographics", category_name),
+          levels = level_order
+        )
+      ) %>%
+      filter(!is.na(category_name_mod))
+  })
+
   output$category_tables_ui <- renderUI({
     req(input$state, input$county, input$year)
-    final_table_mod = snapshot_table() 
+    final_table_mod = snapshot_table()
     category_list <- split(final_table_mod, final_table_mod$category_name_mod)
-    
- 
+
     # Build HTML for each category with styled collapsible <details>
     tables_html <- map(category_list, function(cat_df) {
       cat_name <- unique(cat_df$category_name_mod)
-      
+
       cat_df <- cat_df %>%
         mutate(row_group = factor_name) %>%
         select(-category_name, -category_name_mod, -factor_name)
-      
+
       # Build the label to include county/state/year
       county_label <- if (input$county == "Statewide") "" else input$county
       table_label <- paste0(
         if (county_label != "") county_label else state_full(),
-      " ", cat_name # category name last
+        " ",
+        cat_name # category name last
       )
       # Category-specific paragraph
-      cat_para <- switch(as.character(cat_name),
-                         "Demographics" = "", 
-                         "Population Health and Well-being" = "Population health and well-being is something we create as a society, not something an individual can attain in a clinic or be responsible for alone. Health is more than being free from disease and pain; health is the ability to thrive. Well-being covers both quality of life and the ability of people and communities to contribute to the world. Population health involves optimal physical, mental, spiritual and social well-being.",
-                         "Community Conditions" = "Community conditions include the social and economic factors, physical environment and health infrastructure in which people are born, live, learn, work, play, worship and age. Community conditions are also referred to as the social determinants of health.",
-                         "Health Outcomes" = "Health Outcomes tell us how long people live on average within a community, and how much physical and mental health people experience in a community while they are alive.",
-                         "Health Factors" = "Health Factors describe the upstream drivers that influence a community’s health, including social and economic conditions, access to healthcare, and the physical environment. They help us understand what contributes to health and well-being before outcomes occur.",
-                         "" # default blank
+      cat_para <- switch(
+        as.character(cat_name),
+        "Demographics" = "",
+        "Population Health and Well-being" = "Population health and well-being is something we create as a society, not something an individual can attain in a clinic or be responsible for alone. Health is more than being free from disease and pain; health is the ability to thrive. Well-being covers both quality of life and the ability of people and communities to contribute to the world. Population health involves optimal physical, mental, spiritual and social well-being.",
+        "Community Conditions" = "Community conditions include the social and economic factors, physical environment and health infrastructure in which people are born, live, learn, work, play, worship and age. Community conditions are also referred to as the social determinants of health.",
+        "Health Outcomes" = "Health Outcomes tell us how long people live on average within a community, and how much physical and mental health people experience in a community while they are alive.",
+        "Health Factors" = "Health Factors describe the upstream drivers that influence a community’s health, including social and economic conditions, access to healthcare, and the physical environment. They help us understand what contributes to health and well-being before outcomes occur.",
+        "" # default blank
       )
-      
+
       tbl <- gt(cat_df, groupname_col = "row_group") %>%
         tab_style(
           style = cell_text(weight = "bold"),
           locations = cells_row_groups()
         )
-      
+
       if ("value_ci" %in% colnames(cat_df)) {
         tbl <- tbl %>%
           cols_label(
-            value_ci     = paste0(input$county, " (95% CI)"),
+            value_ci = paste0(input$county, " (95% CI)"),
             stateval_fmt = paste0(state_full(), " (95% CI)"),
-            ntlval_fmt   = "United States",
+            ntlval_fmt = "United States",
             measure_label = "",
             years_used_display = ""
           )
@@ -839,12 +1037,12 @@ download_data = reactive({
         tbl <- tbl %>%
           cols_label(
             stateval_fmt = paste0(state_full(), " (95% CI)"),
-            ntlval_fmt   = "United States",
+            ntlval_fmt = "United States",
             measure_label = "",
             years_used_display = ""
           )
       }
-      
+
       tbl <- tbl %>%
         fmt_markdown(columns = measure_label) %>%
         tab_options(
@@ -855,7 +1053,7 @@ download_data = reactive({
           heading.align = "left"
         ) %>%
         tab_header(title = table_label)
-      
+
       div(
         HTML(
           paste0(
@@ -863,14 +1061,14 @@ download_data = reactive({
             "<summary style='font-size:20px; font-weight:bold; padding:10px 15px; 
                          background-color:#f2f2f2; border:1px solid #ccc; 
                          border-radius:5px; cursor:pointer;'>",
-            cat_name, 
+            cat_name,
             "</summary>",
-            
+
             # Paragraph at top of table
             "<div style='font-size:16px; line-height:1.5; margin:15px 0; padding:5px;'>",
             cat_para,
             "</div>",
-            
+
             # Table itself
             "<div style='overflow-x:auto; margin-top:10px;'>",
             as_raw_html(tbl),
@@ -880,26 +1078,24 @@ download_data = reactive({
         )
       )
     })
-    
-    
+
     # Combine all collapsible tables into one UI output
     do.call(tagList, tables_html)
   })
-  
 
   #output$snapshot_semantic <- gt::render_gt({
   #  req(nrow(measure_values_data()) > 0)
   #  snapshot_table()
   #})
-  
-  
-  
+
   # Download handler for CSV
   output$download_data <- downloadHandler(
     filename = function() {
       paste0(
-        gsub(" ", "_", input$state), "_",
-        gsub(" ", "_", input$county), "_",
+        gsub(" ", "_", input$state),
+        "_",
+        gsub(" ", "_", input$county),
+        "_",
         resolved_year(),
         ".csv"
       )
@@ -908,6 +1104,6 @@ download_data = reactive({
       write.csv(download_data(), file, row.names = FALSE)
     }
   )
-  }
+}
 
 shinyApp(ui = ui, server = server)
