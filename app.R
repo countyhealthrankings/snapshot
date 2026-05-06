@@ -1,8 +1,7 @@
 # app.R —
 # ----------------------------------------------------
-# - Load relational county-health data files from a GitHub repo (by year)
+# - Load relational county-health data files from ZENODO
 # - Let user pick a Year and County
-# - Join category, factor, focus area, and measure tables
 # - Show a snapshot table
 # - Provide users with the option to download the data as a csv
 # - Include a placeholder "Latest" option that currently points to the newest year in the repo
@@ -22,139 +21,30 @@ suppressPackageStartupMessages({
   library(digest)
   library(shiny.semantic)
   library(htmltools)
+  library(countyhealthR)
 })
-
-# ---- Repo Config ----
-GITHUB_OWNER <- Sys.getenv(
-  "CHD_GITHUB_OWNER",
-  unset = "County-Health-Rankings-and-Roadmaps"
-)
-GITHUB_REPO <- Sys.getenv("CHD_GITHUB_REPO", unset = "relational_data")
-GITHUB_BRANCH <- Sys.getenv("CHD_GITHUB_BRANCH", unset = "main")
-#DATA_DIR      <- Sys.getenv("CHD_DATA_DIR",      unset = "relational_data")
-GITHUB_TOKEN <- Sys.getenv("GITHUB_TOKEN", unset = NA)
-
-# ---- Helpers: GitHub API and Raw URLs ----
-raw_url <- function(path) {
-  paste0(
-    "https://raw.githubusercontent.com/",
-    GITHUB_OWNER,
-    "/",
-    GITHUB_REPO,
-    "/",
-    GITHUB_BRANCH,
-    "/",
-    path
-  )
-}
-
-api_headers <- function() {
-  h <- c(
-    Accept = "application/vnd.github+json",
-    "User-Agent" = "county-health-dashboard-mvp"
-  )
-  if (!is.na(GITHUB_TOKEN) && nzchar(GITHUB_TOKEN)) {
-    h <- c(Authorization = paste("Bearer", GITHUB_TOKEN), h)
-  }
-  h
-}
-
-# helper to build GitHub raw URL
-read_csv_github <- function(path) {
-  url <- raw_url(path)
-  readr::read_csv(url, show_col_types = FALSE, progress = FALSE)
-}
-
-# helper to download data for all counties
-get_github_file_for_year <- function(pattern, year) {
-  api_url <- paste0(
-    "https://api.github.com/repos/",
-    "County-Health-Rankings-and-Roadmaps/",
-    "relational_data/contents/downloadable"
-  )
-
-  resp <- jsonlite::fromJSON(api_url)
-
-  resp %>%
-    dplyr::filter(
-      type == "file",
-      grepl(pattern, name, ignore.case = TRUE),
-      grepl(as.character(year), name)
-    )
-}
-
-
-# load the names datasets that are not year, county, or measure specific (ie these are always loaded)
-
-cat_names <- read_csv_github(file.path("t_category.csv"))
-fac_names <- read_csv_github(file.path("t_factor.csv"))
-foc_names <- read_csv_github(file.path("t_focus_area.csv"))
-mea_years <- read_csv_github(file.path("t_measure_years.csv")) %>%
-  select(year, measure_id, years_used)
-mea_compare <- read_csv_github(file.path("t_measure.csv"))
-# this has JRs comparable codes: compare_states and compare_years
-# where -1 = unknown, 0 = no, 1 = yes, and 2= with caution
-
-mea_names = mea_years %>%
-  full_join(mea_compare, by = c("measure_id", "year"))
-
 
 #define default years so something shows before api call
 available_years <- reactiveVal(c("2023", "2022"))
 
-list_year_dirs <- memoise(function() {
-  # Build GitHub API URL for the repo directory
-  url <- paste0(
-    "https://api.github.com/repos/",
-    GITHUB_OWNER,
-    "/",
-    GITHUB_REPO,
-    "/contents/"
+list_years_dirs <- memoise(function() {
+  msg <- tryCatch(
+    countyhealthR::list_chrr_measures(release_year = 0),
+    error = function(e) e$message
   )
-
-  # Fetch the contents
-  resp <- httr::GET(url)
-  if (httr::status_code(resp) >= 300) {
-    warning("GitHub API call failed: ", httr::status_code(resp))
-    return(character())
-  }
-
-  # Parse JSON response
-  items <- jsonlite::fromJSON(httr::content(
-    resp,
-    as = "text",
-    encoding = "UTF-8"
-  ))
-
-  if (!length(items)) {
-    return(character())
-  }
-
-  # Extract years from filenames
-  years <- items %>%
-    as_tibble() %>%
-    filter(type == "file") %>%
-    pull(name) %>%
-    str_extract("_([0-9]{4})\\.csv") %>% # match "_20XX.csv"
-    str_remove_all("[^0-9]") %>% # remove non-numeric chars
-    na.omit() %>%
-    unique() %>%
-    sort(decreasing = TRUE)
-
+  
+  years <- stringr::str_extract_all(msg, "\\d{4}")[[1]] %>%
+    as.integer() %>%
+    sort()
+  
   return(years)
 })
 
 
-#available_years <- shiny::reactiveVal(NULL)
 
 # ---- Load county list ----
 get_county_list <- function() {
-  url <- "https://github.com/County-Health-Rankings-and-Roadmaps/chrr_measure_calcs/raw/main/inputs/county_fips.sas7bdat"
-  temp <- tempfile(fileext = ".sas7bdat")
-  download.file(url, temp, mode = "wb") # wb = write binary
-  counties <- haven::read_sas(temp)
-
-  return(counties)
+  readRDS("data/county_fips.rds")
 }
 
 # add the full state name in
@@ -213,13 +103,13 @@ ui <- semanticPage(
     uiOutput("location_header_ui"),
     helpText(
       "Data loaded from",
-      a("Zenodo", href = "https://zenodo.org/records/18332002"),
+      a("Zenodo", href = "https://doi.org/10.5281/zenodo.18157681"),
       " using the ",
       a(
-        "countyhealthR package",
+        "countyhealthR",
         href = "https://cran.r-project.org/web/packages/countyhealthR/refman/countyhealthR.html"
       ),
-      "."
+      " package."
     )
   ),
 
@@ -304,7 +194,7 @@ server <- function(input, output, session) {
   })
 
   observe({
-    yrs <- tryCatch(list_year_dirs(), error = function(e) character())
+    yrs <- tryCatch(list_years_dirs(), error = function(e) character())
     if (length(yrs) == 0) {
       yrs <- c("2023", "2022")
     }
@@ -391,7 +281,7 @@ server <- function(input, output, session) {
 
     downloadButton(
       "download_analytic_all_counties",
-      paste0("Download analytic data for all counties (", resolved_year(), ")")
+      paste0("Download data for all U.S. counties (", resolved_year(), ")")
     )
   })
 
@@ -426,7 +316,7 @@ server <- function(input, output, session) {
   output$download_analytic_all_counties <- downloadHandler(
     filename = function() {
       req(nzchar(input$year))
-      paste0("analytic_all_counties_", resolved_year(), ".csv")
+      paste0("all_US_counties_", resolved_year(), ".csv")
     },
 
     content = function(file) {
@@ -434,10 +324,17 @@ server <- function(input, output, session) {
 
       year <- resolved_year()
 
-      f <- get_github_file_for_year(
-        pattern = "analytic",
-        year = year
-      )
+      #f <- get_github_file_for_year(
+      #  pattern = "analytic",
+      #  year = year
+      #)
+      
+      f = jsonlite::fromJSON("https://api.github.com/repos/countyhealthrankings/relational_data/contents/downloadable") %>% 
+        dplyr::filter(
+          type == "file",
+          grepl("analytic", name, ignore.case = TRUE),
+          grepl(as.character(year), name)
+        )
 
       download.file(
         url = f$download_url,
@@ -447,22 +344,6 @@ server <- function(input, output, session) {
     }
   )
 
-  year_data <- reactive({
-    y <- resolved_year()
-    req(y)
-
-    mea_df <- read_csv_github(file.path(paste0("t_measure_data_", y, ".csv")))
-
-    mea_df %>%
-      select(
-        county_fips,
-        state_fips,
-        measure_id,
-        raw_value,
-        ci_low,
-        ci_high
-      )
-  })
 
   output$location_header_ui <- renderUI({
     # Resolve year
@@ -493,7 +374,9 @@ server <- function(input, output, session) {
   })
 
   county_df <- reactive({
+    y = resolved_year()
     req(input$state, input$county)
+    req(y)
 
     # If statewide, don't create county_df
     if (input$county == "Statewide") {
@@ -511,15 +394,11 @@ server <- function(input, output, session) {
     county_fips <- chosen$countycode[1]
     req(state_fips, county_fips)
 
-    df <- year_data()
-    req(df)
+    #county_df = 
+    countyhealthR::get_chrr_county_data(state = state_fips, county = county_fips, release_year = y) %>% 
+      dplyr::select(measure_id, county_fips, state_fips, raw_value, ci_low, ci_high) %>% 
+      distinct(measure_id, state_fips, .keep_all = TRUE) # NEED TO DOUBLE CHECK FOR SOME REASON IN ANCIENT TIMES THERE ARE DUPS (CHECK 2010 MEASURE_ID 4 in Minnesota, FOR EXAMPLE)
 
-    # filter measure data by fips
-    df %>%
-      filter(state_fips == !!state_fips, county_fips == !!county_fips)
-
-    # for quick n dirty testing
-    #county_df = mea_df %>% filter(state_fips == !!state_fips, county_fips == !!county_fips)
   })
 
   state_df <- reactive({
@@ -540,21 +419,7 @@ server <- function(input, output, session) {
     req(input_state_fips)
     county_fips <- "000"
 
-    # construct path to state data CSV for the chosen year
-    # state_file = sprintf("https://github.com/County-Health-Rankings-and-Roadmaps/chrr_measure_calcs/raw/main/relational_data/%s/t_state_data_%s.csv", 2023, 2023)
-
-    state_file <- sprintf(
-      "https://github.com/County-Health-Rankings-and-Roadmaps/relational_data/raw/main/t_state_data_%s.csv",
-      y
-    )
-
-    df <- tryCatch(
-      readr::read_csv(state_file, show_col_types = FALSE),
-      error = function(e) {
-        warning("Failed to load state data: ", e$message)
-        return(NULL)
-      }
-    )
+    df = countyhealthR::get_chrr_county_data(state = input_state_fips, release_year = y)
 
     # filter for the chosen state
     #state_df =
@@ -565,7 +430,8 @@ server <- function(input, output, session) {
         stateval = raw_value,
         state_ci_low = ci_low,
         state_ci_high = ci_high
-      )
+      ) %>% 
+      distinct(measure_id, state_fips, .keep_all = TRUE) # NEED TO DOUBLE CHECK FOR SOME REASON IN ANCIENT TIMES THERE ARE DUPS (CHECK 2010 MEASURE_ID 4, FOR EXAMPLE)
   })
 
   ntl_df <- reactive({
@@ -576,6 +442,7 @@ server <- function(input, output, session) {
     # construct path to state data CSV for the chosen year
     # state_file = sprintf("https://github.com/County-Health-Rankings-and-Roadmaps/chrr_measure_calcs/raw/main/relational_data/%s/t_state_data_%s.csv", 2023, 2023)
 
+    # NOTE: this still relies on github.... i need to edit and resubmit to cran to make ntl data available via countyhealthR 
     state_file <- sprintf(
       "https://github.com/County-Health-Rankings-and-Roadmaps/relational_data/raw/main/t_state_data_%s.csv",
       y
@@ -604,17 +471,17 @@ server <- function(input, output, session) {
     req(y)
 
     # Build the measure mapping
-    measure_map <- mea_names %>%
+    measure_map <- countyhealthR:::get_measure_map() %>%
       filter(year == y) %>%
-      left_join(
-        foc_names,
-        by = c("measure_parent" = "focus_area_id", "year")
-      ) %>%
-      left_join(
-        fac_names,
-        by = c("focus_area_parent" = "factor_id", "year")
-      ) %>%
-      left_join(cat_names, by = c("factor_parent" = "category_id", "year")) %>%
+      #left_join(
+      #  foc_names,
+      #  by = c("measure_parent" = "focus_area_id", "year")
+      #) %>%
+      #left_join(
+      #  fac_names,
+      #  by = c("focus_area_parent" = "factor_id", "year")
+      #) %>%
+      #left_join(cat_names, by = c("factor_parent" = "category_id", "year")) %>%
       select(
         measure_id,
         measure_name,
@@ -623,8 +490,8 @@ server <- function(input, output, session) {
         category_name,
         display_precision,
         format_type,
-        compare_states,
-        compare_years,
+        compare_states_text,
+        compare_years_text,
         description
       )
 
@@ -638,8 +505,13 @@ server <- function(input, output, session) {
       req(county_df(), state_df(), ntl_df())
       measure_values <- county_df() %>%
         left_join(state_df(), by = c("measure_id", "state_fips")) %>%
-        left_join(ntl_df() %>% select(-state_fips), by = "measure_id") %>%
+        left_join(ntl_df() %>% select(-state_fips), by = "measure_id", relationship = "many-to-many") %>%
         left_join(measure_map, by = "measure_id")
+      
+     # measure_values <- county_df %>%
+    #   left_join(state_df, by = c("measure_id", "state_fips")) %>%
+    #  left_join(ntl_df %>% select(-state_fips), by = "measure_id", relationship = "many-to-many") %>%
+    #  left_join(measure_map, by = "measure_id")
     }
 
     # Apply formatting
@@ -895,21 +767,21 @@ server <- function(input, output, session) {
           )
         ),
 
-        compare_years_text = case_when(
-          compare_years == -1 ~ "Comparability across years is unknown",
-          compare_years == 0 ~ "Not comparable across years",
-          compare_years == 1 ~ "Comparable across years",
-          compare_years == 2 ~ "Use caution when comparing across years",
-          TRUE ~ ""
-        ),
+       # compare_years_text = case_when(
+      #    compare_years == -1 ~ "Comparability across years is unknown",
+      #    compare_years == 0 ~ "Not comparable across years",
+      #    compare_years == 1 ~ "Comparable across years",
+      #    compare_years == 2 ~ "Use caution when comparing across years",
+      #    TRUE ~ ""
+      #  ),
 
         years_used_display = paste0(years_used, ": ", compare_years_text),
 
         compare_states_sym = case_when(
-          compare_states == -1 ~ "❓",
-          compare_states == 0 ~ "❌",
-          compare_states == 1 ~ "✅",
-          compare_states == 2 ~ "⚠️",
+          compare_states_text == "Comparability across states is unknown" ~ "❓",
+          compare_states_text == "Not comparable across states" ~ "❌",
+          compare_states_text== "Comparable across states" ~ "✅",
+          compare_states_text == "Use caution when comparing across states" ~ "⚠️",
           TRUE ~ ""
         ),
 
