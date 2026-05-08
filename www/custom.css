@@ -272,8 +272,16 @@ select {
 }
 
 .snapshot-table {
-  overflow-x: auto;
   margin-top: 10px;
+
+  /* ALWAYS vertical scroll */
+  max-height: 70vh;
+  overflow-y: auto;
+
+  /* default: no horizontal scroll */
+  overflow-x: hidden;
+
+  -webkit-overflow-scrolling: touch;
 }
 
 /* =========================
@@ -288,6 +296,8 @@ select {
   border: none !important;
 
   font-size: 15px !important;
+  width: 100% !important;
+  max-width: 100% !important;
 }
 
 .gt_heading {
@@ -364,5 +374,13 @@ a:hover {
   .four.wide.column,
   .twelve.wide.column {
     width: 100% !important;
+  }
+  
+   .snapshot-table {
+    overflow-x: auto;
+  }
+
+  .gt_table {
+    min-width: 700px; /* or adjust based on your table */
   }
 }
