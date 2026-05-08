@@ -1,0 +1,386 @@
+
+/* =========================================================
+   IMPORT FONT
+========================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;500;600;700&display=swap');
+
+/* =========================================================
+   ROOT VARIABLES
+========================================================= */
+
+:root {
+
+  --brand-blue: #003C69;
+  --blue: #1B70B6;
+  --light-blue: #A8CFEF;
+  --card-blue: rgba(232, 242, 255, 0.7);
+
+  --brand-orange: #CD441B;
+  --brand-orange-dark: #701A00;
+
+  --bg: #F6F6F6;
+  --surface: #FFFFFF;
+
+  --text: #1F2933;
+  --muted: #6B7280;
+
+  --border: #E5E7EB;
+
+  --radius: 6px;
+
+  --light-orange: #FEE9D2;
+}
+
+
+/* =========================
+   GLOBAL
+========================= */
+
+html,
+body {
+
+  background-color: var(--bg) !important;
+
+  color: var(--text);
+
+  font-family: "Lato", Arial, Helvetica, sans-serif;
+
+  line-height: 1.65;
+
+  font-size: 16px;
+
+  margin: 0;
+
+  min-height: 100%;
+}
+
+/* important for semantic ui */
+body > .ui.page.grid,
+body > .ui.grid,
+body > .ui.container {
+  background-color: var(--bg) !important;
+}
+
+/* limit width slightly */
+.ui.container {
+  max-width: 1450px !important;
+}
+
+
+/* =========================
+   GLOBAL LEFT ALIGNMENT FIX
+========================= */
+
+.page-wrapper {
+  padding-left: 1.5rem !important;
+  padding-right: 1.5rem !important;
+}
+/* =========================
+   TYPOGRAPHY
+========================= */
+
+h1, h2, h3, h4, h5,
+.ui.header {
+  font-family: 'Inter', sans-serif !important;
+  color: var(--brand-blue) !important;
+  letter-spacing: -0.02em;
+}
+
+h1 { font-weight: 800 !important; }
+h2 { font-weight: 700 !important; }
+h3 { font-weight: 700 !important; }
+
+p, .ui.message, .ui.segment {
+  color: var(--brand-blue);
+}
+
+/* =========================
+   SEGMENTS / CARDS
+========================= */
+
+.ui.segment,
+.ui.raised.segment {
+
+  background: linear-gradient(90deg, var(--bg), transparent);
+
+  border-radius: var(--radius) !important;
+
+  border: 1px solid var(--border) !important;
+
+  box-shadow:
+    0 4px 12px rgba(0,0,0,0.03) !important;
+
+  padding: 1.5rem !important;
+}
+
+/* =========================
+   SIDEBAR
+========================= */
+
+.four.wide.column .ui.segment {
+  position: sticky;
+  top: 20px;
+}
+
+/* =========================
+   BUTTONS
+========================= */
+
+.ui.button,
+.btn {
+
+  background: var(--blue-primary) !important;
+  color: white !important;
+
+  border-radius: 12px !important;
+  border: none !important;
+
+  font-weight: 600 !important;
+
+  transition: all 0.15s ease;
+}
+
+.ui.button:hover,
+.btn:hover {
+
+  background: var(--blue-hover) !important;
+  transform: translateY(-1px);
+}
+
+/* =========================
+   INPUTS
+========================= */
+
+.ui.dropdown,
+.ui.selection.dropdown,
+.ui.input input,
+select {
+
+  border-radius: 12px !important;
+  border: 1px solid var(--border-light) !important;
+
+  min-height: 44px !important;
+
+  box-shadow: none !important;
+}
+
+/* =========================
+   DOWNLOAD BUTTONS
+========================= */
+
+.downloadButton,
+.shiny-download-link {
+
+  background-color: var(--card-blue) !important;
+
+  color: var(--brand-blue) !important;
+
+  border: 1px solid #8bb9dd !important;
+
+  border-radius: var(--radius) !important;
+
+  font-weight: 600 !important;
+
+  padding: 0.75rem 1rem !important;
+
+  transition: all 0.15s ease !important;
+}
+
+/* hover state */
+.downloadButton:hover,
+.shiny-download-link:hover {
+
+  background-color: #96c3e8 !important;
+
+  color: var(--brand-blue) !important;
+
+  transform: translateY(-1px);
+}
+
+
+/* =========================
+   WARNING MESSAGE
+========================= */
+
+.ui.warning.message {
+
+  background: var(--light-orange) !important;
+
+  border: 1px solid #f2c9a6 !important;
+
+  border-radius: var(--radius) !important;
+
+  color: var(--brand-orange-dark) !important;
+
+  box-shadow: none !important;
+}
+
+/* =========================
+   SNAPSHOT ACCORDIONS
+========================= */
+
+.snapshot-details {
+  margin-bottom: 20px;
+}
+
+.snapshot-details summary {
+
+  background: var(--surface);
+
+  border-radius: 16px;
+
+  padding: 18px 22px;
+
+  font-weight: 700;
+
+  font-size: 1.15rem;
+
+  cursor: pointer;
+
+  border: 1px solid var(--border-light);
+
+  box-shadow:
+    0 1px 2px rgba(0,0,0,0.03),
+    0 4px 14px rgba(0,0,0,0.03);
+
+  transition: all 0.15s ease;
+
+  list-style: none;
+}
+
+/* remove default browser arrow */
+.snapshot-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.snapshot-details summary:hover {
+  transform: translateY(-1px);
+}
+
+.snapshot-description {
+
+  font-size: 16px;
+
+  line-height: 1.7;
+
+  margin: 18px 0;
+
+  padding: 8px 4px;
+
+  color: var(--brand-blue);
+}
+
+.snapshot-table {
+  margin-top: 10px;
+
+  /* ALWAYS vertical scroll */
+  max-height: 70vh;
+  overflow-y: auto;
+
+  /* default: no horizontal scroll */
+  overflow-x: hidden;
+
+  -webkit-overflow-scrolling: touch;
+}
+
+/* =========================
+   GT TABLES
+========================= */
+
+.gt_table {
+
+  border-radius: 14px !important;
+  overflow: hidden !important;
+
+  border: none !important;
+
+  font-size: 15px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.gt_heading {
+  background-color: white !important;
+}
+
+.gt_col_heading {
+
+  background-color: #eef2f5 !important;
+
+  color: var(--brand-blue) !important;
+
+  font-weight: 700 !important;
+
+  border-bottom: 1px solid var(--border-light) !important;
+}
+
+.gt_group_heading {
+
+  background-color: #f7f8fa !important;
+
+  color: var(--text-muted) !important;
+
+  text-transform: uppercase;
+
+  letter-spacing: 0.04em;
+
+  font-size: 0.78rem !important;
+
+  font-weight: 700 !important;
+}
+
+/* =========================
+   LINKS
+========================= */
+
+a {
+  color: var(--blue);
+  text-decoration: underline;
+}
+
+a:hover {
+  color: var(--brand-orange);
+}
+
+/* =========================
+   SPACING
+========================= */
+
+.ui.grid {
+  margin-top: 2rem !important;
+}
+
+.ui.container {
+  max-width: 1450px !important;
+}
+
+.ui.divider {
+  margin: 2.5rem 0 !important;
+}
+
+@media only screen and (max-width: 768px) {
+
+  .ui.stackable.grid {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .ui.stackable.grid > .column {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  .four.wide.column,
+  .twelve.wide.column {
+    width: 100% !important;
+  }
+  
+   .snapshot-table {
+    overflow-x: auto;
+  }
+
+  .gt_table {
+    min-width: 700px; /* or adjust based on your table */
+  }
+}

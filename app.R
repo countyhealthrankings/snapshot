@@ -17,12 +17,12 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(memoise)
   library(gt)
-  library(bslib)
   library(digest)
   library(shiny.semantic)
   library(htmltools)
   library(countyhealthR)
 })
+
 
 #define default years so something shows before api call
 available_years <- reactiveVal(c("2023", "2022"))
@@ -75,6 +75,33 @@ state_choices <- county_choices %>%
 ##################################################################################
 # ---- UI ----
 ui <- semanticPage(
+  
+  #need this for styling 
+  tags$head(
+    
+    # Google font
+    tags$link(
+      rel = "stylesheet",
+      href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    ),
+    
+    # Your CSS file
+    tags$link(
+      rel = "stylesheet",
+      type = "text/css",
+      href = "custom.css"
+    )
+    
+    ,
+    
+    # favicon
+    tags$link(
+      rel = "shortcut icon",
+      href = "favicon.ico"
+    )
+    
+  ),
+   
   title = "Health Snapshot",
   div(
     class = "ui warning message",
@@ -96,26 +123,36 @@ ui <- semanticPage(
     )
   ),
 
-  div(
-    class = "ui container",
-
-    h2(class = "ui header", "Health Snapshot"),
-    uiOutput("location_header_ui"),
-    helpText(
-      "Data loaded from",
-      a("Zenodo", href = "https://doi.org/10.5281/zenodo.18157681"),
-      " using the ",
-      a(
-        "countyhealthR",
-        href = "https://cran.r-project.org/web/packages/countyhealthR/refman/countyhealthR.html"
-      ),
-      " package."
-    )
-  ),
-
-  div(class = "ui divider"),
-
   # Grid layout: left panel (filters) + right panel (main content)
+  
+  div(
+    class = "page-wrapper",
+    
+    h2(class = "ui header", "Health Snapshot"),
+      
+      uiOutput("location_header_ui"),
+      helpText(
+        "Data loaded from",
+        a("Zenodo", href = "https://doi.org/10.5281/zenodo.18157681"),
+        " using the ",
+        a(
+          "countyhealthR",
+          href = "https://cran.r-project.org/web/packages/countyhealthR/refman/countyhealthR.html"
+        ),
+        " package."
+      ),
+      
+      div(
+        class = "download-buttons",
+        br(),
+        uiOutput("download_data_ui"),
+        br(),
+        uiOutput("download_all_counties_ui")
+      ),
+      
+      
+    ),
+  
   div(
     class = "ui stackable grid",
 
@@ -154,14 +191,12 @@ ui <- semanticPage(
     # --- Main Panel ---
     div(
       class = "twelve wide column",
-
+      
       div(
         class = "ui segment",
-        uiOutput("download_data_ui"),
-        uiOutput("download_all_counties_ui"),
-        br(),
-        br(),
-        # no accordion, just separate gts for each cat
+        
+       
+        # Tables / accordion below
         uiOutput("category_tables_ui")
       )
     )
@@ -929,22 +964,20 @@ server <- function(input, output, session) {
       div(
         HTML(
           paste0(
-            "<details style='margin-bottom:15px;'>",
-            "<summary style='font-size:20px; font-weight:bold; padding:10px 15px; 
-                         background-color:#f2f2f2; border:1px solid #ccc; 
-                         border-radius:5px; cursor:pointer;'>",
+            "<details class='snapshot-details'>",
+            
+            "<summary>",
             cat_name,
             "</summary>",
-
-            # Paragraph at top of table
-            "<div style='font-size:16px; line-height:1.5; margin:15px 0; padding:5px;'>",
+            
+            "<div class='snapshot-description'>",
             cat_para,
             "</div>",
-
-            # Table itself
-            "<div style='overflow-x:auto; margin-top:10px;'>",
+            
+            "<div class='snapshot-table'>",
             as_raw_html(tbl),
             "</div>",
+            
             "</details>"
           )
         )
