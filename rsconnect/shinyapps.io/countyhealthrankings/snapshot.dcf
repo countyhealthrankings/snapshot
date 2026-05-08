@@ -1,0 +1,13 @@
+name: snapshot
+title: snapshot
+username: countyhealthrankings
+account: countyhealthrankings
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16411708
+bundleId: 11968612
+url: https://countyhealthrankings.shinyapps.io/snapshot/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .posit/publish/deployments/deployment-JPU5.toml|.posit/publish/deployments/deployment-SPJI.toml|.posit/publish/deployments/renv.lock|.posit/publish/snapshot-10GG.toml|.posit/publish/snapshot-DFDJ.toml
