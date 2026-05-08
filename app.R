@@ -91,6 +91,15 @@ ui <- semanticPage(
       type = "text/css",
       href = "custom.css"
     )
+    
+    ,
+    
+    # favicon
+    tags$link(
+      rel = "shortcut icon",
+      href = "favicon.ico"
+    )
+    
   ),
    
   title = "Health Snapshot",

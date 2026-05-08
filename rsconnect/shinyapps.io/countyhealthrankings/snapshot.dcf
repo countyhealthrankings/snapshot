@@ -5,7 +5,7 @@ account: countyhealthrankings
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 16411708
-bundleId: 11968612
+bundleId: 11968737
 url: https://countyhealthrankings.shinyapps.io/snapshot/
 version: 1
 asMultiple: FALSE
