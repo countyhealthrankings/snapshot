@@ -310,7 +310,7 @@ select {
 
   color: var(--brand-blue) !important;
 
-  font-weight: 700 !important;
+  font-weight: 1000 !important;
 
   border-bottom: 1px solid var(--border-light) !important;
 }
@@ -319,15 +319,14 @@ select {
 
   background-color: #f7f8fa !important;
 
-  color: var(--text-muted) !important;
+  color: var(--brand-blue) !important;
 
   text-transform: uppercase;
 
-  letter-spacing: 0.04em;
-
-  font-size: 0.78rem !important;
-
-  font-weight: 700 !important;
+  padding-top: 12px !important;
+  padding-bottom: 8px !important;
+  font-size: 20px !important;
+  font-weight: 750 !important;
 }
 
 /* =========================

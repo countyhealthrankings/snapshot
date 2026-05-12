@@ -864,8 +864,8 @@ server <- function(input, output, session) {
     final_table <- measure_values_data() %>%
       #final_table = measure_values %>%
       select(
-        measure_label,
         years_used_display,
+        measure_label,
         any_of("value_ci"),
         stateval_fmt,
         ntlval_fmt,
@@ -925,11 +925,7 @@ server <- function(input, output, session) {
         "" # default blank
       )
 
-      tbl <- gt(cat_df, groupname_col = "row_group") %>%
-        tab_style(
-          style = cell_text(weight = "bold"),
-          locations = cells_row_groups()
-        )
+      tbl <- gt(cat_df, groupname_col = "row_group") 
 
       if ("value_ci" %in% colnames(cat_df)) {
         tbl <- tbl %>%
