@@ -1,6 +1,6 @@
 # app.R —
 # ----------------------------------------------------
-# - Load relational county-health data files from ZENODO
+# - Load relational county-health data files 
 # - Let user pick a Year and County
 # - Show a snapshot table
 # - Provide users with the option to download the data as a csv
@@ -20,26 +20,111 @@ suppressPackageStartupMessages({
   library(digest)
   library(shiny.semantic)
   library(htmltools)
-  library(countyhealthR)
+  library(arrow)
+  library(duckdb)
+  library(DBI)
+  con <- dbConnect(
+    duckdb::duckdb(),
+    dbdir = ":memory:"
+  )
 })
 
 
 #define default years so something shows before api call
 available_years <- reactiveVal(c("2023", "2022"))
 
-list_years_dirs <- memoise(function() {
-  msg <- tryCatch(
-    countyhealthR::list_chrr_measures(release_year = 0),
-    error = function(e) e$message
-  )
-  
-  years <- stringr::str_extract_all(msg, "\\d{4}")[[1]] %>%
-    as.integer() %>%
-    sort()
-  
-  return(years)
-})
+# build measure map (will be used alwasy)
+cat_names <- arrow::read_parquet(
+  "parquet/t_category.parquet"
+)
 
+fac_names <- arrow::read_parquet(
+  "parquet/t_factor.parquet"
+)
+
+foc_names <- arrow::read_parquet(
+  "parquet/t_focus_area.parquet"
+)
+
+mea_years <- arrow::read_parquet(
+  "parquet/t_measure_years.parquet"
+) %>%
+  select(
+    year,
+    measure_id,
+    years_used
+  )
+
+mea_compare <- arrow::read_parquet(
+  "parquet/t_measure.parquet"
+)
+
+measure_map_all <- mea_years %>%
+  
+  full_join(
+    mea_compare,
+    by = c("measure_id", "year")
+  ) %>%
+  
+  left_join(
+    foc_names,
+    by = c(
+      "measure_parent" = "focus_area_id",
+      "year"
+    )
+  ) %>%
+  
+  left_join(
+    fac_names,
+    by = c(
+      "focus_area_parent" = "factor_id",
+      "year"
+    )
+  ) %>%
+  
+  left_join(
+    cat_names,
+    by = c(
+      "factor_parent" = "category_id",
+      "year"
+    )
+  ) %>%
+  
+  mutate(
+    
+    compare_years_text = case_when(
+      compare_years == -1 ~ "Comparability across release years is unknown",
+      compare_years ==  0 ~ "Not comparable across release years",
+      compare_years ==  1 ~ "Comparable across release years",
+      compare_years ==  2 ~ "Use caution when comparing across release years",
+      TRUE ~ ""
+    ),
+    
+    compare_states_text = case_when(
+      compare_states == -1 ~ "Comparability across states is unknown",
+      compare_states ==  0 ~ "Not comparable across states",
+      compare_states ==  1 ~ "Comparable across states",
+      compare_states ==  2 ~ "Use caution when comparing across states",
+      TRUE ~ ""
+    )
+    
+  ) %>%
+  
+  select(
+    year,
+    measure_id,
+    measure_name,
+    description,
+    years_used,
+    compare_years_text,
+    compare_states_text,
+    factor_name,
+    focus_area_name,
+    category_name,
+    direction,
+    display_precision,
+    format_type
+  )
 
 
 # ---- Load county list ----
@@ -131,16 +216,7 @@ ui <- semanticPage(
     h2(class = "ui header", "Health Snapshot"),
       
       uiOutput("location_header_ui"),
-      helpText(
-        "Data loaded from",
-        a("Zenodo", href = "https://doi.org/10.5281/zenodo.18157681"),
-        " using the ",
-        a(
-          "countyhealthR",
-          href = "https://cran.r-project.org/web/packages/countyhealthR/refman/countyhealthR.html"
-        ),
-        " package."
-      ),
+      
       
       div(
         class = "download-buttons",
@@ -215,7 +291,7 @@ server <- function(input, output, session) {
   #    unique() %>%         # keep unique values
   #    sort(decreasing = TRUE)  # newest first
   #})
-  # provide default years immediately, update later with GitHub API
+  # provide default years immediately, gets updated later 
   available_years <- reactiveVal(c("2023", "2022"))
 
   # reactive to get full state name
@@ -229,7 +305,19 @@ server <- function(input, output, session) {
   })
 
   observe({
-    yrs <- tryCatch(list_years_dirs(), error = function(e) character())
+    parquet_files <- list.files(
+      "parquet",
+      pattern = "\\.parquet$",
+      full.names = FALSE
+    )
+    
+    yrs <- parquet_files %>%
+      stringr::str_extract("\\d{4}") %>%
+      unique() %>%
+      na.omit() %>%
+      as.numeric() %>%
+      sort(decreasing = TRUE)
+  
     if (length(yrs) == 0) {
       yrs <- c("2023", "2022")
     }
@@ -349,33 +437,33 @@ server <- function(input, output, session) {
   )
 
   output$download_analytic_all_counties <- downloadHandler(
+    
     filename = function() {
       req(nzchar(input$year))
       paste0("all_US_counties_", resolved_year(), ".csv")
     },
-
+    
     content = function(file) {
-      req(nzchar(input$year))
-
-      year <- resolved_year()
-
-      #f <- get_github_file_for_year(
-      #  pattern = "analytic",
-      #  year = year
-      #)
       
-      f = jsonlite::fromJSON("https://api.github.com/repos/countyhealthrankings/relational_data/contents/downloadable") %>% 
-        dplyr::filter(
-          type == "file",
-          grepl("analytic", name, ignore.case = TRUE),
-          grepl(as.character(year), name)
-        )
-
-      download.file(
-        url = f$download_url,
-        destfile = file,
-        mode = "wb"
-      )
+      req(nzchar(input$year))
+      
+      year <- resolved_year()
+      
+      f <- list.files("parquet", full.names = TRUE)
+      
+      f <- f[
+        grepl("analytic", f, ignore.case = TRUE) &
+          grepl(as.character(year), f)
+      ]
+      
+      req(length(f) > 0)
+      
+      parquet_file <- f[1]
+      
+      df <- arrow::read_parquet(parquet_file)
+      
+      readr::write_csv(df, file)
+      
     }
   )
 
@@ -428,12 +516,35 @@ server <- function(input, output, session) {
     state_fips <- chosen$statecode[1]
     county_fips <- chosen$countycode[1]
     req(state_fips, county_fips)
-
-    #county_df = 
-    countyhealthR::get_chrr_county_data(state = state_fips, county = county_fips, release_year = y) %>% 
-      dplyr::select(measure_id, county_fips, state_fips, raw_value, ci_low, ci_high) %>% 
-      distinct(measure_id, state_fips, .keep_all = TRUE) # NEED TO DOUBLE CHECK FOR SOME REASON IN ANCIENT TIMES THERE ARE DUPS (CHECK 2010 MEASURE_ID 4 in Minnesota, FOR EXAMPLE)
-
+    
+    parquet_file <- sprintf(
+      "parquet/t_measure_data_years_%s.parquet",
+      y
+    )
+    
+    query <- sprintf("
+    SELECT
+      measure_id,
+      county_fips,
+      state_fips,
+      raw_value,
+      ci_low,
+      ci_high
+    FROM read_parquet('%s')
+    WHERE state_fips = '%s'
+      AND county_fips = '%s'
+  ",
+                     parquet_file,
+                     state_fips,
+                     county_fips)
+    
+    dbGetQuery(con, query) %>%
+      mutate(
+        state_fips = stringr::str_pad(state_fips, 2, pad = "0"),
+        county_fips = stringr::str_pad(county_fips, 3, pad = "0")
+      ) %>%
+      distinct(measure_id, state_fips, .keep_all = TRUE)
+    
   })
 
   state_df <- reactive({
@@ -453,51 +564,68 @@ server <- function(input, output, session) {
     input_state_fips <- chosen$statecode[1]
     req(input_state_fips)
     county_fips <- "000"
+    
+    
+    parquet_file <- sprintf(
+      "parquet/t_state_data_years_%s.parquet",
+      y
+    )
+    
+    
+    query <- sprintf("
+    SELECT
+      measure_id,
+      state_fips,
+      raw_value AS stateval,
+      ci_low AS state_ci_low,
+      ci_high AS state_ci_high
+    FROM read_parquet('%s')
+    WHERE state_fips = '%s'
+      AND county_fips = '000'
+  ",
+                     parquet_file,
+                     input_state_fips)
+    
+    dbGetQuery(con, query) %>%
+      distinct(measure_id, state_fips, .keep_all = TRUE) %>% 
+      mutate(
+        state_fips = stringr::str_pad(state_fips, 2, pad = "0")
+      )
+    
 
-    df = countyhealthR::get_chrr_county_data(state = input_state_fips, release_year = y)
-
-    # filter for the chosen state
-    #state_df =
-    df %>%
-      dplyr::filter(state_fips == !!input_state_fips) %>%
-      dplyr::select(measure_id, state_fips, raw_value, ci_low, ci_high) %>%
-      rename(
-        stateval = raw_value,
-        state_ci_low = ci_low,
-        state_ci_high = ci_high
-      ) %>% 
-      distinct(measure_id, state_fips, .keep_all = TRUE) # NEED TO DOUBLE CHECK FOR SOME REASON IN ANCIENT TIMES THERE ARE DUPS (CHECK 2010 MEASURE_ID 4, FOR EXAMPLE)
+    
   })
 
   ntl_df <- reactive({
     req(input$year)
     y <- resolved_year()
     req(y)
-
-    # construct path to state data CSV for the chosen year
-    # state_file = sprintf("https://github.com/County-Health-Rankings-and-Roadmaps/chrr_measure_calcs/raw/main/relational_data/%s/t_state_data_%s.csv", 2023, 2023)
-
-    # NOTE: this still relies on github.... i need to edit and resubmit to cran to make ntl data available via countyhealthR 
-    state_file <- sprintf(
-      "https://github.com/County-Health-Rankings-and-Roadmaps/relational_data/raw/main/t_state_data_%s.csv",
+    
+    
+    parquet_file <- sprintf(
+      "parquet/t_state_data_years_%s.parquet",
       y
     )
+    
+    query <- sprintf("
+    SELECT
+      measure_id,
+      state_fips,
+      raw_value AS ntlval,
+      ci_low AS ntl_ci_low,
+      ci_high AS ntl_ci_high
+    FROM read_parquet('%s')
+    WHERE state_fips = '00'
+  ",
+                     parquet_file)
+    
+    dbGetQuery(con, query) %>% 
+      mutate(
+        state_fips = stringr::str_pad(state_fips, 2, pad = "0")
+      )
+    
 
-    df <- tryCatch(
-      readr::read_csv(state_file, show_col_types = FALSE),
-      error = function(e) {
-        warning("Failed to load state data: ", e$message)
-        return(NULL)
-      }
-    )
-    req(df) # only if downstream code needs df
-
-    # filter ntl vals only
-    #ntl_df =
-    df %>%
-      dplyr::filter(state_fips == "00") %>%
-      dplyr::select(measure_id, state_fips, raw_value, ci_low, ci_high) %>%
-      rename(ntlval = raw_value, ntl_ci_low = ci_low, ntl_ci_high = ci_high)
+    
   })
 
   measure_values_data <- reactive({
@@ -505,18 +633,76 @@ server <- function(input, output, session) {
     y <- resolved_year()
     req(y)
 
-    # Build the measure mapping
-    measure_map <- countyhealthR:::get_measure_map() %>%
+    measure_map = mea_names <- mea_years %>%
+      dplyr::full_join(
+        mea_compare,
+        by = c("measure_id", "year")
+      )
+    
+    mea_names <- mea_names %>%
+      dplyr::left_join(
+        foc_names,
+        by = c(
+          "measure_parent" = "focus_area_id",
+          "year"
+        )
+      ) %>%
+      dplyr::left_join(
+        fac_names,
+        by = c(
+          "focus_area_parent" = "factor_id",
+          "year"
+        )
+      ) %>%
+      dplyr::left_join(
+        cat_names,
+        by = c(
+          "factor_parent" = "category_id",
+          "year"
+        )
+      ) %>%
+      dplyr::mutate(
+        
+        compare_years_text = dplyr::case_when(
+          compare_years == -1 ~ "Comparability across release years is unknown",
+          compare_years ==  0 ~ "Not comparable across release years",
+          compare_years ==  1 ~ "Comparable across release years",
+          compare_years ==  2 ~ "Use caution when comparing across release years",
+          TRUE ~ ""
+        ),
+        
+        compare_states_text = dplyr::case_when(
+          compare_states == -1 ~ "Comparability across states is unknown",
+          compare_states ==  0 ~ "Not comparable across states",
+          compare_states ==  1 ~ "Comparable across states",
+          compare_states ==  2 ~ "Use caution when comparing across states",
+          TRUE ~ ""
+        )
+        
+      ) %>%
+      dplyr::select(
+        year,
+        measure_id,
+        measure_name,
+        description,
+        years_used,
+        compare_years_text,
+        compare_states_text,
+        factor_name,
+        focus_area_name,
+        category_name,
+        direction,
+        display_precision,
+        format_type
+      )
+    
+    
+    # subset the measure mapping
+    
+    measure_map <- measure_map_all %>%
+      
       filter(year == y) %>%
-      #left_join(
-      #  foc_names,
-      #  by = c("measure_parent" = "focus_area_id", "year")
-      #) %>%
-      #left_join(
-      #  fac_names,
-      #  by = c("focus_area_parent" = "factor_id", "year")
-      #) %>%
-      #left_join(cat_names, by = c("factor_parent" = "category_id", "year")) %>%
+      
       select(
         measure_id,
         measure_name,
@@ -529,6 +715,8 @@ server <- function(input, output, session) {
         compare_years_text,
         description
       )
+    
+     
 
     # Start with the correct base data
     if (input$county == "Statewide") {
