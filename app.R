@@ -59,12 +59,29 @@ mea_compare <- arrow::read_parquet(
   "parquet/t_measure.parquet"
 )
 
+measure_sources <- arrow::read_parquet(
+  "parquet/t_measure_data_source.parquet"
+)
+
+measure_links = arrow::read_parquet(
+  "parquet/calculation_links.parquet"
+)
+
 measure_map_all <- mea_years %>%
   
   full_join(
     mea_compare,
     by = c("measure_id", "year")
   ) %>%
+  
+  left_join(measure_links, by = "measure_id") %>%
+  mutate(
+    calculations_link = if_else(
+      year == max(year, na.rm = TRUE),
+      calculations_link,
+      NA_character_
+    )
+  ) %>% 
   
   left_join(
     foc_names,
@@ -87,6 +104,34 @@ measure_map_all <- mea_years %>%
     by = c(
       "factor_parent" = "category_id",
       "year"
+    )
+  ) %>%
+  
+  left_join(
+    measure_sources,
+    by = c(
+      "measure_id" = "measure_id",
+      "year" = "release_year"
+    )
+  ) %>%
+  
+  mutate(
+    data_source_system_link = case_when(
+      
+      !is.na(data_source_link) &
+        data_source_link != "" &
+        !is.na(data_source_system) &
+        data_source_system != "" ~
+        
+        paste0(
+          "<a href='",
+          data_source_link,
+          "' target='_blank'>",
+          data_source_system,
+          "</a>"
+        ),
+      
+      TRUE ~ data_source_system
     )
   ) %>%
   
@@ -123,7 +168,9 @@ measure_map_all <- mea_years %>%
     category_name,
     direction,
     display_precision,
-    format_type
+    format_type,
+    data_source_system_link,
+    calculations_link
   )
 
 
@@ -259,8 +306,7 @@ ui <- semanticPage(
                     <b>Legend:</b> <br>
                     ✅ These data can be compared across states<br>
                     ❌ These data are incomparable across states<br>
-                    ⚠️ Use caution if comparing these data across states"
-        )),
+                    ⚠️ Use caution if comparing these data across states")),
       )
     ),
 
@@ -703,6 +749,16 @@ server <- function(input, output, session) {
       
       filter(year == y) %>%
       
+      mutate(
+        calculations_link_html = case_when(
+          !is.na(calculations_link) ~ paste0(
+            "<a href='", calculations_link,
+            "' target='_blank'>Code</a>"
+          ),
+          TRUE ~ NA_character_
+        )
+      ) %>%
+      
       select(
         measure_id,
         measure_name,
@@ -711,11 +767,24 @@ server <- function(input, output, session) {
         category_name,
         display_precision,
         format_type,
+        calculations_link,
+        calculations_link_html,
         compare_states_text,
         compare_years_text,
-        description
+        description,
+        data_source_system_link
       )
     
+    measure_map <- measure_map %>%
+      mutate(
+        calculations_link_html = case_when(
+          !is.na(calculations_link) ~ paste0(
+            "<a href='", calculations_link,
+            "' target='_blank'>Code</a>"
+          ),
+          TRUE ~ NA_character_
+        )
+      )
      
 
     # Start with the correct base data
@@ -1008,14 +1077,33 @@ server <- function(input, output, session) {
           TRUE ~ ""
         ),
 
-        measure_label = paste0(
-          "**",
-          measure_name,
-          "**: ",
-          description,
-          "<br>",
-          compare_states_sym
-        )
+      measure_label = paste0(
+        
+        case_when(
+          
+          !is.na(calculations_link) ~ paste0(
+            "<a href='",
+            calculations_link,
+            "' target='_blank'>",
+            "**",
+            measure_name,
+            "***",
+            "</a>"
+          ),
+          
+          TRUE ~ paste0(
+            "**",
+            measure_name,
+            "**"
+          )
+          
+        ),
+        
+        ": ",
+        description,
+        "<br>",
+        compare_states_sym
+      )
       )
 
     measure_values
@@ -1054,6 +1142,7 @@ server <- function(input, output, session) {
       select(
         years_used_display,
         measure_label,
+        data_source_system_link, 
         any_of("value_ci"),
         stateval_fmt,
         ntlval_fmt,
@@ -1087,6 +1176,20 @@ server <- function(input, output, session) {
     final_table_mod = snapshot_table()
     category_list <- split(final_table_mod, final_table_mod$category_name_mod)
 
+    # Build note text
+    note_text <- paste0(
+      "*Data source links are provided when available. We do not verify or maintain external links.*",
+      
+      if (resolved_year() == max(available_years())) {
+        paste0(
+          "<br>",
+          "*\\*In the latest release year, asterisked measure names link to calculation code and documentation when available.*"
+        )
+      } else {
+        ""
+      }
+    )
+    
     # Build HTML for each category with styled collapsible <details>
     tables_html <- map(category_list, function(cat_df) {
       cat_name <- unique(cat_df$category_name_mod)
@@ -1121,6 +1224,7 @@ server <- function(input, output, session) {
             value_ci = paste0(input$county, " (95% CI)"),
             stateval_fmt = paste0(state_full(), " (95% CI)"),
             ntlval_fmt = "United States",
+            data_source_system_link = "", 
             measure_label = "",
             years_used_display = ""
           )
@@ -1129,13 +1233,16 @@ server <- function(input, output, session) {
           cols_label(
             stateval_fmt = paste0(state_full(), " (95% CI)"),
             ntlval_fmt = "United States",
+            data_source_system_link = "", 
             measure_label = "",
             years_used_display = ""
           )
       }
 
       tbl <- tbl %>%
-        fmt_markdown(columns = measure_label) %>%
+        fmt_markdown(columns = c(
+          measure_label, 
+          data_source_system_link)) %>%
         tab_options(
           row_group.as_column = FALSE,
           container.width = pct(100),
@@ -1143,7 +1250,9 @@ server <- function(input, output, session) {
           data_row.padding = px(6),
           heading.align = "left"
         ) %>%
-        tab_header(title = table_label)
+        tab_header(title = table_label, #)  %>%
+        subtitle = 
+          md(note_text))
 
       div(
         HTML(
