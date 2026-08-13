@@ -1,0 +1,24 @@
+name: Publish Snapshot to Posit Connect
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Posit Connect
+        uses: posit-dev/connect-actions/deploy@main
+        with:
+          connect-server: https://connect.doit.wisc.edu/
+          content-guid: 5118ac46-4e32-46c1-b8ac-40766367f4f3
+          connect-api-key: ${{ secrets.CONNECT_API_KEY }}
